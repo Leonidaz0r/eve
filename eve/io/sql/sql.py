@@ -148,7 +148,7 @@ class SQL(DataLayer):
                     args['spec'] = \
                         self.combine_queries(args['spec'],
                                              parse_dictionary(spec, model))
-                except (AttributeError, TypeError):
+                except (AttributeError, TypeError, KeyError):
                     # if parse failed and json loads fails - raise 400
                     abort(400)
 

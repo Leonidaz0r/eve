@@ -21,6 +21,17 @@ from sqlalchemy.ext.associationproxy import AssociationProxy
 
 sqla_op = operator
 sqla_exp = flask_sqlalchemy.sqlalchemy.sql.expression
+mongo_op = {
+    '$gt': sqla_op.gt,
+    '$gte': sqla_op.ge,
+    '$lt': sqla_op.lt,
+    '$lte': sqla_op.le,
+    '$ne': sqla_op.ne,
+}
+mongo_bool_op = {
+    '$or': sqla_op.or_,
+    '$and': sqla_op.and_
+}
 
 
 class ParseError(ValueError):
@@ -41,31 +52,53 @@ def parse_dictionary(filter_dict, model):
     conditions = []
 
     for k, v in filter_dict.items():
-        # first check if we have FK or PK before using ilike
-        attr = getattr(model, k)
-
-        if isinstance(attr, AssociationProxy):
-            conditions.append(attr.contains(v))
-
-        elif hasattr(attr, 'property') and \
-                hasattr(attr.property, 'remote_side'):  # a relation
-
-            for fk in attr.property.remote_side:
-                conditions.append(sqla_op.eq(fk, v))
+        if k in mongo_bool_op:
+            subconditions = map(
+                lambda x: reduce(sqla_op.and_, parse_dictionary(x, model)), v)
+            conditions.append(reduce(mongo_bool_op[k], subconditions))
 
         else:
-            try:
-                new_o, v = parse_sqla_operators(v)
-                new_filter = getattr(attr, new_o)(v)
-            except (TypeError, ValueError):  # json/sql parse error
-                if isinstance(v, list):  # we have an array
-                    new_filter = attr.in_(v)
-                else:
-                    new_filter = sqla_op.eq(attr, v)
+            # first check if we have FK or PK before using ilike
+            attr = getattr(model, k)
 
-            conditions.append(new_filter)
+            if isinstance(attr, AssociationProxy):
+                conditions.append(attr.contains(v))
+
+            elif hasattr(attr, 'property') and \
+                    hasattr(attr.property, 'remote_side'):  # a relation
+
+                for fk in attr.property.remote_side:
+                    conditions.append(sqla_op.eq(fk, v))
+
+            elif isinstance(v, dict):
+                # mongo syntax
+                conditions.append(parse_mongo_operators(v, attr))
+
+            else:
+                try:
+                    new_o, v = parse_sqla_operators(v)
+                    new_filter = getattr(attr, new_o)(v)
+                except (TypeError, ValueError):  # json/sql parse error
+                    if isinstance(v, list):  # we have an array
+                        new_filter = attr.in_(v)
+                    else:
+                        new_filter = sqla_op.eq(attr, v)
+
+                conditions.append(new_filter)
 
     return conditions
+
+
+def parse_mongo_operators(expression, attr):
+    """
+    Parse a dict describing a value like:
+        {'$gt': 5, '$lt': 7}
+    """
+    # dict in mongo syntax
+    new_filters = []
+    for op, v in expression.iteritems():
+        new_filters.append(mongo_op[op](attr, v))
+    return reduce(sqla_op.and_, new_filters)
 
 
 def parse_sqla_operators(expression):
