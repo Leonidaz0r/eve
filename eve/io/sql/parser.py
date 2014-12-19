@@ -57,13 +57,18 @@ def parse_dictionary(filter_dict, model):
                 lambda x: reduce(sqla_op.and_, parse_dictionary(x, model)), v)
             conditions.append(reduce(mongo_bool_op[k], subconditions))
 
+        elif '.' in k:
+            parts = k.split('.')
+            relation = getattr(model, parts[0])
+            conditions.append(relation.has(**{parts[1]: v}))
+
         else:
-            # first check if we have FK or PK before using ilike
             attr = getattr(model, k)
 
             if isinstance(attr, AssociationProxy):
                 conditions.append(attr.contains(v))
 
+            # first check if we have FK or PK before using ilike
             elif hasattr(attr, 'property') and \
                     hasattr(attr.property, 'remote_side'):  # a relation
 
